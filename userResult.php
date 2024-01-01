@@ -1,9 +1,10 @@
 <?php
+
 include("include/connection.php");
-//($con,$period,$number,$result,$openprice,$tabtype);
+
 $periodid = "20230939645";
 $number = "5";
-$result = "green";
+$result = "Green";
 $openprice = "31530";
 $tabtype = "parity";
 
@@ -232,49 +233,110 @@ function resultbyUser($con,$periodid,$number,$result,$openprice,$tabtype){
 		from `tbl_betting` where `periodid`='".$periodid."' and `tab`='".$tabtype."'");
 	}
 
-	$uniqueUser = [];
-	$lowerPrice = 100000000;
-	while($getdataResult=mysqli_fetch_array($sqli))
-	{
-		
-		$userid=$getdataResult['userid'];
-		$userperiodid=$getdataResult['periodid'];
-		$type=$getdataResult['type'];
-		$value=$getdataResult['value'];	
-		$amount=$getdataResult['amount'];
-		$tab=$getdataResult['tab'];
-		$paidamount=$getdataResult['valueamount'];
-		$fee=$getdataResult['tax'];
-		$status=$getdataResult['status'];
+
+	// Create array to store Results
+	$lowestAmountSuccessRecords = [];
+	$lowestAmountSuccessRecordsMultiWin = [];
+	$FailedRecordsArray = [];
+
+	// Fetch data in a while loop
+	while ($row = mysqli_fetch_array($sqli, MYSQLI_ASSOC)) {
+	    $userId = $row['userid'];
+	    $amount = $row['amount'];
+	    $status = $row['status'];
+
+	    if ($status === 'success' && isset($lowestAmountSuccessRecords[$userId])) {
+	        
+	        if($amount == $lowestAmountSuccessRecords[$userId]['amount']){
+	        	$lowestAmountSuccessRecordsMultiWin[$userId] = $row;
+	        }elseif ($amount < $lowestAmountSuccessRecords[$userId]['amount']) {
+	            $lowestAmountSuccessRecords[$userId] = $row;
+	        }else{
+	        	$FailedRecordsArray[] = $row;
+	        }
+
+	    } elseif ($status === 'success' && !isset($lowestAmountSuccessRecords[$userId])) {
+	        $lowestAmountSuccessRecords[$userId] = $row;
+	    }elseif ($status === 'fail') {
+	    	$FailedRecordsArray[] = $row;
+	    }
+	}
+
+	// Results
+	$successRecords = array_values($lowestAmountSuccessRecords);
+	$FailedRecords = array_values($FailedRecordsArray);
+	$lowestAmountSuccessMultiWinRecords = array_values($lowestAmountSuccessRecordsMultiWin);
+
+	// Insert Success Record DB
+	foreach ($successRecords as $key => $successValue) {
+		$userid=$successValue['userid'];
+		$userperiodid=$successValue['periodid'];
+		$type=$successValue['type'];
+		$value=$successValue['value'];	
+		$amount=$successValue['amount'];
+		$tab=$successValue['tab'];
+		$paidamount=$successValue['valueamount'];
+		$fee=$successValue['tax'];
+		$status=$successValue['status'];
 		$date=date( 'Y-m-d H:i:s' );
-		
-		if(in_array($userid,$uniqueUser)){
-			if($lowerPrice < $amount){
-				$status = 'fail';
-				$paidamount=$amount - $fee;
-			}else{
-				$lowerPrice = $amount;
-			}
-		}else{
-			array_push($uniqueUser, $userid);
-		}
 
 		$insertQuery=mysqli_query($con,"INSERT INTO `tbl_userresult` (`userid`, `periodid`, `type`, `value`, `amount`, `openprice`, `tab`, `paidamount`, `fee`, `status`, `createdate`) VALUES ('".$userid."', '".$userperiodid."', '".$type."', '".$value."','".$amount."', '".$openprice."', '".$tab."', '".$paidamount."', '".$fee."', '".$status."','".$date."')");
 		
+		$sql= mysqli_query($con,"INSERT INTO `tbl_order`(`userid`,`transactionid`,`amount`,`status`,`createdate`) VALUES ('".$userid."','".$userperiodid."','".$paidamount."','1','".$date."')");
+		@$orderid=mysqli_insert_id($con);
 
-		if($status=='success'){
+		$sql3= mysqli_query($con,"INSERT INTO `tbl_walletsummery`(`userid`,`orderid`,`amount`,`type`,`actiontype`,`createdate`) VALUES ('".$userid."','".$orderid."','".$paidamount."','credit','win','".$date."')");
+
+		$selectwallet=mysqli_query($con,"select `amount` from `tbl_wallet` where `userid`='".$userid."'");
+		$walletResult=mysqli_fetch_array($selectwallet);
 		
-			$sql= mysqli_query($con,"INSERT INTO `tbl_order`(`userid`,`transactionid`,`amount`,`status`,`createdate`) VALUES ('".$userid."','".$userperiodid."','".$paidamount."','1','".$date."')");
-			@$orderid=mysqli_insert_id($con);
+		$finalbalancecredit=$walletResult['amount']+$paidamount;	
+		$sqlwallet= mysqli_query($con,"UPDATE `tbl_wallet` SET `amount` = '".$finalbalancecredit."' WHERE `userid`= '".$userid."'");
 
-			$sql3= mysqli_query($con,"INSERT INTO `tbl_walletsummery`(`userid`,`orderid`,`amount`,`type`,`actiontype`,`createdate`) VALUES ('".$userid."','".$orderid."','".$paidamount."','credit','win','".$date."')");
+	}
 
-			$selectwallet=mysqli_query($con,"select `amount` from `tbl_wallet` where `userid`='".$userid."'");
-			$walletResult=mysqli_fetch_array($selectwallet);
-	 	
-			$finalbalancecredit=$walletResult['amount']+$paidamount;	
-			$sqlwallet= mysqli_query($con,"UPDATE `tbl_wallet` SET `amount` = '".$finalbalancecredit."' WHERE `userid`= '".$userid."'");
-		}
+	// Insert MultiWin Success Record DB
+	foreach ($lowestAmountSuccessMultiWinRecords as $key => $successValue) {
+		$userid=$successValue['userid'];
+		$userperiodid=$successValue['periodid'];
+		$type=$successValue['type'];
+		$value=$successValue['value'];	
+		$amount=$successValue['amount'];
+		$tab=$successValue['tab'];
+		$paidamount=$successValue['valueamount'];
+		$fee=$successValue['tax'];
+		$status=$successValue['status'];
+		$date=date( 'Y-m-d H:i:s' );
+
+		$insertQuery=mysqli_query($con,"INSERT INTO `tbl_userresult` (`userid`, `periodid`, `type`, `value`, `amount`, `openprice`, `tab`, `paidamount`, `fee`, `status`, `createdate`) VALUES ('".$userid."', '".$userperiodid."', '".$type."', '".$value."','".$amount."', '".$openprice."', '".$tab."', '".$paidamount."', '".$fee."', '".$status."','".$date."')");
+		
+		$sql= mysqli_query($con,"INSERT INTO `tbl_order`(`userid`,`transactionid`,`amount`,`status`,`createdate`) VALUES ('".$userid."','".$userperiodid."','".$paidamount."','1','".$date."')");
+		@$orderid=mysqli_insert_id($con);
+
+		$sql3= mysqli_query($con,"INSERT INTO `tbl_walletsummery`(`userid`,`orderid`,`amount`,`type`,`actiontype`,`createdate`) VALUES ('".$userid."','".$orderid."','".$paidamount."','credit','win','".$date."')");
+
+		$selectwallet=mysqli_query($con,"select `amount` from `tbl_wallet` where `userid`='".$userid."'");
+		$walletResult=mysqli_fetch_array($selectwallet);
+		
+		$finalbalancecredit=$walletResult['amount']+$paidamount;	
+		$sqlwallet= mysqli_query($con,"UPDATE `tbl_wallet` SET `amount` = '".$finalbalancecredit."' WHERE `userid`= '".$userid."'");
+
+	}
+
+	// Insert Failed Record DB
+	foreach ($FailedRecords as $key => $failedValue) {
+		$userid=$failedValue['userid'];
+		$userperiodid=$failedValue['periodid'];
+		$type=$failedValue['type'];
+		$value=$failedValue['value'];	
+		$amount=$failedValue['amount'];
+		$tab=$failedValue['tab'];
+		$fee=$failedValue['tax'];
+		$paidamount=$amount - $fee;
+		$status="fail";
+		$date=date( 'Y-m-d H:i:s' );
+
+		$insertQuery=mysqli_query($con,"INSERT INTO `tbl_userresult` (`userid`, `periodid`, `type`, `value`, `amount`, `openprice`, `tab`, `paidamount`, `fee`, `status`, `createdate`) VALUES ('".$userid."', '".$userperiodid."', '".$type."', '".$value."','".$amount."', '".$openprice."', '".$tab."', '".$paidamount."', '".$fee."', '".$status."','".$date."')");
 	}
 }
 ?>
